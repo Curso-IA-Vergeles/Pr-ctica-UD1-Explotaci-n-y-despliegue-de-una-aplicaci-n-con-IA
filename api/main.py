@@ -11,7 +11,10 @@ app = FastAPI(title="Miniapp IA - Resumidor")
 
 # Inicialización diferida del cliente para evitar fallos fatales en tiempo de importación
 api_key = os.getenv("AI_PROVIDER_API_KEY")
-client = OpenAI(api_key=api_key) if api_key else None
+base_url = os.getenv("AI_BASE_URL")
+ai_model = os.getenv("AI_MODEL", "gemini-3.5-flash")
+
+client = OpenAI(api_key=api_key, base_url=base_url) if api_key else None
 
 class RequestData(BaseModel):
     texto: str
@@ -38,7 +41,7 @@ def generar_resumen(data: RequestData):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model=ai_model,
             messages=[
                 {"role": "system", "content": "Eres un asistente técnico experto en extraer resúmenes concisos de una sola frase."},
                 {"role": "user", "content": f"Resume este texto: {data.texto}"}
