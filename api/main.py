@@ -14,6 +14,7 @@ app = FastAPI(title="Miniapp IA - Resumidor Protegido")
 
 # Configuracion del cliente de IA de Google Generative AI
 api_key = os.getenv("AI_PROVIDER_API_KEY")
+<<<<<<< HEAD
 if api_key:
     genai.configure(api_key=api_key)
 else:
@@ -23,6 +24,12 @@ else:
 jwks_url = os.getenv("CLERK_JWKS_URL")
 jwks_client = PyJWKClient(jwks_url) if jwks_url else None
 security = HTTPBearer()
+=======
+base_url = os.getenv("AI_BASE_URL")
+ai_model = os.getenv("AI_MODEL", "gemini-3.5-flash")
+
+client = OpenAI(api_key=api_key, base_url=base_url) if api_key else None
+>>>>>>> 9c31c90dabb86032c5fc45c4699c3f15bcbd696e
 
 class RequestData(BaseModel):
     texto: str
@@ -72,6 +79,7 @@ def generar_resumen(data: RequestData, session: dict = Depends(validar_token)):
         raise HTTPException(status_code=500, detail="Configuracion de Google Gemini ausente en el servidor.")
 
     try:
+<<<<<<< HEAD
         # Instanciacion del modelo optimizado de Google
         model = genai.GenerativeModel('gemini-1.5-flash')
         
@@ -87,3 +95,23 @@ def generar_resumen(data: RequestData, session: dict = Depends(validar_token)):
         
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Error en la resolucion upstream con Gemini: {str(e)}")
+=======
+        response = client.chat.completions.create(
+            model=ai_model,
+            messages=[
+                {"role": "system", "content": "Eres un asistente técnico experto en extraer resúmenes concisos de una sola frase."},
+                {"role": "user", "content": f"Resume este texto: {data.texto}"}
+            ],
+            max_tokens=150,
+            temperature=0.2
+        )
+        return ResponseData(resumen=response.choices[0].message.content.strip())
+
+    except AuthenticationError:
+        raise HTTPException(status_code=401, detail="Fallo de autorización al contactar con el proveedor de IA.")
+    except APIError:
+        raise HTTPException(status_code=502, detail="Error de comunicación o timeout con el servicio externo.")
+    except Exception:
+        # En un entorno de producción, la traza real se enviaría al sistema de logs centralizado
+        raise HTTPException(status_code=500, detail="Error interno del servidor durante el procesamiento.")
+>>>>>>> 9c31c90dabb86032c5fc45c4699c3f15bcbd696e
