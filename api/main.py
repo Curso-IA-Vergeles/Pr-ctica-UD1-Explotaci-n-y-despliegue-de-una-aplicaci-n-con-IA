@@ -1,17 +1,28 @@
 import os
-from fastapi import FastAPI, HTTPException
+import jwt
+import google.generativeai as genai
+from jwt import PyJWKClient
+from fastapi import FastAPI, HTTPException, Security, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from openai import OpenAI, APIError, AuthenticationError
 
-# Cargar variables de entorno desde el nivel superior del proyecto
+# Carga en memoria de los secretos antes de inicializar los clientes
 load_dotenv(dotenv_path="../.env")
 
-app = FastAPI(title="Miniapp IA - Resumidor")
+app = FastAPI(title="Miniapp IA - Resumidor Protegido")
 
-# Inicialización diferida del cliente para evitar fallos fatales en tiempo de importación
+# Configuracion del cliente de IA de Google Generative AI
 api_key = os.getenv("AI_PROVIDER_API_KEY")
-client = OpenAI(api_key=api_key) if api_key else None
+if api_key:
+    genai.configure(api_key=api_key)
+else:
+    genai = None
+
+# Instanciacion del resolutor JWKS para verificar las firmas RSA de Clerk
+jwks_url = os.getenv("CLERK_JWKS_URL")
+jwks_client = PyJWKClient(jwks_url) if jwks_url else None
+security = HTTPBearer()
 
 class RequestData(BaseModel):
     texto: str
@@ -19,39 +30,60 @@ class RequestData(BaseModel):
 class ResponseData(BaseModel):
     resumen: str
 
+def validar_token(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """
+    Middleware interceptor para validacion JWT.
+    Extrae la clave publica asincrona de Clerk y evalua la integridad y caducidad del token.
+    """
+    if not jwks_client:
+        raise HTTPException(status_code=500, detail="Configuracion JWKS ausente en el entorno del servidor.")
+    
+    token = credentials.credentials
+    try:
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        payload = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            options={"verify_aud": False}
+        )
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="El token JWT ha expirado.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Firma de token invalida o malformada.")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Fallo de autenticacion no controlado.")
+
 @app.get("/api/health")
 def health_check():
-    """Endpoint de liveness para validación de despliegue en orquestadores y balanceadores."""
     return {"status": "ok"}
 
 @app.post("/api/generar", response_model=ResponseData)
-def generar_resumen(data: RequestData):
+def generar_resumen(data: RequestData, session: dict = Depends(validar_token)):
     """
-    Procesa el texto de entrada delegando la generación a la API de OpenAI.
-    Implementa validación de payload y enmascaramiento de errores upstream.
+    Endpoint principal protegido. Depende de la resolucion exitosa del middleware de token.
+    Implementa el modelo Gemini 1.5 Flash para tareas de generacion rapida de texto.
     """
     if not data.texto.strip():
-        raise HTTPException(status_code=400, detail="El payload 'texto' es obligatorio y no puede estar vacío.")
+        raise HTTPException(status_code=400, detail="El payload 'texto' es obligatorio.")
     
-    if not client:
-        raise HTTPException(status_code=500, detail="La configuración del proveedor de IA no está inicializada.")
+    if not genai:
+        raise HTTPException(status_code=500, detail="Configuracion de Google Gemini ausente en el servidor.")
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Eres un asistente técnico experto en extraer resúmenes concisos de una sola frase."},
-                {"role": "user", "content": f"Resume este texto: {data.texto}"}
-            ],
-            max_tokens=150,
-            temperature=0.2
-        )
-        return ResponseData(resumen=response.choices[0].message.content.strip())
-
-    except AuthenticationError:
-        raise HTTPException(status_code=401, detail="Fallo de autorización al contactar con el proveedor de IA.")
-    except APIError:
-        raise HTTPException(status_code=502, detail="Error de comunicación o timeout con el servicio externo.")
-    except Exception:
-        # En un entorno de producción, la traza real se enviaría al sistema de logs centralizado
-        raise HTTPException(status_code=500, detail="Error interno del servidor durante el procesamiento.")
+        # Instanciacion del modelo optimizado de Google
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Inyeccion del contexto de sistema directamente en el prompt
+        prompt = f"Eres un asistente experto en generar resúmenes concisos de una línea. Resume este texto: {data.texto}"
+        
+        response = model.generate_content(prompt)
+        
+        if not response.text:
+            raise ValueError("El modelo de IA devolvio una respuesta vacia.")
+            
+        return ResponseData(resumen=response.text.strip())
+        
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error en la resolucion upstream con Gemini: {str(e)}")
