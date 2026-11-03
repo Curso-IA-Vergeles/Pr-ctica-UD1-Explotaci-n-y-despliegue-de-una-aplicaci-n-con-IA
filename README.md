@@ -9,7 +9,7 @@ Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
 - [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-## 🚀 Backend (Python / FastAPI)
+## Backend (Python / FastAPI)
 
 ## React Compiler
 El backend se encuentra dentro de la carpeta [`api/`](file:///home/David/Documentos/IDES/espa/Pr-ctica-UD1-Explotaci-n-y-despliegue-de-una-aplicaci-n-con-IA/api).
