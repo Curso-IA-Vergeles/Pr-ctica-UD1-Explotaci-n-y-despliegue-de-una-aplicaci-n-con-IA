@@ -40,6 +40,43 @@ flowchart LR
     A -->|"prompt"| G[Google Gemini]
     G -->|"resumen"| A
     A -->|"JSON {resumen}"| F
+# React + TypeScript + Vite
+# Práctica UD1 - Explotación y Despliegue de una Aplicación con IA
+
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Aplicación completa compuesta por un frontend en **React + TypeScript + Vite** y un backend en **Python (FastAPI)** que interactúa con proveedores de IA.
+
+Currently, two official plugins are available:
+---
+
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Backend (Python / FastAPI)
+
+## React Compiler
+El backend se encuentra dentro de la carpeta [`api/`](file:///home/David/Documentos/IDES/espa/Pr-ctica-UD1-Explotaci-n-y-despliegue-de-una-aplicaci-n-con-IA/api).
+
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. Configuración de la API Key y Variables de Entorno
+
+## Expanding the Oxlint configuration
+El backend requiere una clave de API para comunicarse con el modelo de lenguaje.
+
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+1. Crea o edita el archivo `.env` en la **raíz del proyecto** (puedes tomar como base [.env.example](file:///home/David/Documentos/IDES/espa/Pr-ctica-UD1-Explotaci-n-y-despliegue-de-una-aplicaci-n-con-IA/.env.example)):
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
 ```
 
 - **Vercel:** un único proyecto. La SPA se compila como sitio estático y `api/main.py`
