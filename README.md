@@ -106,7 +106,8 @@ Git y nunca debe subirse.
 | Nombre | Finalidad | Carácter | Dónde se configura | Cuándo se usa |
 | --- | --- | --- | --- | --- |
 | `AI_PROVIDER_API_KEY` | Clave de Google AI Studio para Gemini | **Secreto** | `.env`, Vercel, EC2 | Ejecución (servidor) |
-| `AI_MODEL` | Modelo de Gemini | Configuración | `.env`, Vercel, EC2 | Ejecución (servidor) |
+| `AI_MODEL` | Modelo principal de Gemini | Configuración | `.env`, Vercel, EC2 | Ejecución (servidor) |
+| `AI_FALLBACK_MODEL` | Modelo de respaldo si el principal está saturado | Configuración | `.env`, Vercel, EC2 | Ejecución (servidor) |
 | `AI_TIMEOUT_SECONDS` | Tiempo máximo de espera del proveedor | Configuración | `.env`, Vercel, EC2 | Ejecución (servidor) |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Clave publicable de Clerk | Público | `.env`, Vercel, build-arg Docker | Compilación del frontend |
 | `CLERK_SECRET_KEY` | Clave secreta para validar el JWT | **Secreto** | `.env`, Vercel, EC2 | Ejecución (servidor) |
@@ -124,8 +125,8 @@ El proyecto único contiene la SPA y la función Python:
 
 - `vercel.json` reescribe `/api/(.*)` a `/api/main`.
 - La función expone `GET /api/health` y `POST /api/generar`.
-- Variables de servidor: `AI_PROVIDER_API_KEY`, `AI_MODEL`, `AI_TIMEOUT_SECONDS`,
-  `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES`.
+- Variables de servidor: `AI_PROVIDER_API_KEY`, `AI_MODEL`, `AI_FALLBACK_MODEL`,
+  `AI_TIMEOUT_SECONDS`, `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES`.
 - Variable de compilación: `VITE_CLERK_PUBLISHABLE_KEY`.
 - `CLERK_AUTHORIZED_PARTIES` debe incluir el dominio de producción y los de preview que
   se vayan a usar; no se debe limitar a `localhost`.
@@ -177,7 +178,19 @@ propósito. Los secretos no se pasan en la construcción.
 
 ### 8.2. Ejecución
 
+Con Compose (recomendado; usa [`docker-compose.yml`](docker-compose.yml) y `.env`):
+
 ```bash
+docker compose up -d --build
+docker compose ps
+```
+
+Equivalente con Docker directo:
+
+```bash
+docker build \
+  --build-arg VITE_CLERK_PUBLISHABLE_KEY="pk_test_..." \
+  -t resumidor-ia:local .
 docker run -d --name resumidor-ia --restart unless-stopped \
   -p 8000:8000 --env-file .env resumidor-ia:local
 ```
@@ -186,14 +199,32 @@ docker run -d --name resumidor-ia --restart unless-stopped \
 `.dockerignore` excluye `.env`, `.venv`, `node_modules`, `dist`, tests y documentación.
 El proceso corre como usuario no root y escucha en `0.0.0.0:8000`.
 
-### 8.3. Estado, logs y ciclo de vida
+### 8.3. Direcciones de acceso
+
+El puerto se publica en `0.0.0.0:8000` y `[::]:8000`. Direcciones comprobadas en esta
+máquina:
+
+| Desde | URL |
+| --- | --- |
+| El propio host | <http://localhost:8000/> o <http://127.0.0.1:8000/> |
+| La red local (WLAN actual) | <http://192.168.14.128:8000/> |
+| IP interna del contenedor (desde el host) | <http://172.18.0.2:8000/> |
+| Otro contenedor de la red Compose | <http://app:8000/> |
+
+La IP `172.18.0.2` cambia si se recrea el contenedor; para el uso normal utiliza
+`localhost:8000` o la IP LAN. La IP LAN puede cambiar por DHCP.
+
+### 8.4. Estado, logs y ciclo de vida
 
 ```bash
 docker ps
 docker logs --tail 100 resumidor-ia
+docker compose logs -f
 docker stop resumidor-ia
 docker start resumidor-ia
 docker restart resumidor-ia
+docker compose restart
+docker compose down
 docker rm -f resumidor-ia
 ```
 
@@ -205,12 +236,13 @@ curl http://127.0.0.1:8000/api/health   # {"status":"ok"}
 
 La imagen incluye un `HEALTHCHECK` contra `/api/health`.
 
-**Estado:** en el entorno donde se preparó este cambio no hay Docker instalado ni
-permisos para instalarlo, así que **la imagen no se ha construido aquí**. Se validó el
-mismo runtime sin contenedor: se compiló `dist/` y se arrancó FastAPI con
-`STATIC_DIR=../dist`, comprobando SPA, assets, health, rutas de cliente y 401 sin token.
-La construcción y prueba real del contenedor queda pendiente en una máquina con Docker
-y en EC2.
+**Estado verificado:** imagen `resumidor-ia:local` construida con Docker 29.9.2;
+contenedor `resumidor-ia` en estado `healthy` con el puerto `8000` publicado. Se
+comprobaron `/api/health` (200), `/` (200), `POST /api/generar` sin token (401) y una
+llamada real a Gemini desde el contenedor (200). La primera prueba autenticada desde el
+navegador devolvió 502 porque Gemini respondió 503 por saturación del modelo; el backend
+ahora reintenta brevemente, usa `AI_FALLBACK_MODEL` y devuelve un 503 comprensible si
+todos los modelos están ocupados.
 
 ## 9. AWS EC2
 
@@ -249,12 +281,14 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-Resultado verificado: **6 passed**. Casos cubiertos:
+Resultado verificado: **8 passed**. Casos cubiertos:
 
 | Test | Qué demuestra |
 | --- | --- |
 | `test_health_check_es_publico` | El health responde 200 sin autenticación |
 | `test_generar_resumen_con_sesion_valida` | Flujo correcto con sesión válida y proveedor simulado |
+| `test_generar_usa_modelo_de_respaldo_si_el_primario_esta_saturado` | Si el modelo principal devuelve 503, se usa el de respaldo |
+| `test_generar_devuelve_503_si_todos_los_modelos_estan_saturados` | Saturación total controlada, sin filtrar el detalle del proveedor |
 | `test_generar_rechaza_texto_vacio` | Validación de entrada (400) |
 | `test_generar_devuelve_502_si_falla_el_proveedor` | Error del proveedor controlado y sin filtrar detalles internos |
 | `test_generar_rechaza_peticion_sin_token` | 401 sin `Authorization` |
@@ -285,7 +319,7 @@ repetir la petición directa sin token y comprobar el 401.
 | `vite build` no resuelve `@clerk/clerk-react` | `node_modules` desincronizado con `package.json` | `npm install` y conservar `package-lock.json` | `npm run build` compila |
 | El frontend se ve sin estilos y el CSS pesa ~1,8 kB | Tailwind v4 sin plugin PostCSS y con directivas `@tailwind` de v3 | `@tailwindcss/postcss` + `@import "tailwindcss"` | El CSS generado incluye `.min-h-screen` y pesa ~13,8 kB |
 | El endpoint de IA aceptaba peticiones sin sesión | El backend no validaba el JWT de Clerk | Dependencia `require_user` con el SDK oficial | Tests 401 y `curl` sin token |
-| No se puede construir la imagen en este entorno | Docker no está instalado y no hay permisos | Validación por simulación con `STATIC_DIR=../dist`; construir en máquina con Docker/EC2 | SPA, assets, health y 401 comprobados sin contenedor |
+| `502 Bad Gateway` al generar desde el navegador | Gemini devolvió `503 UNAVAILABLE` por alta demanda del modelo (`gemini-2.5-flash`), no por la API key | Reintento corto en el SDK, modelo de respaldo `gemini-3.5-flash` y 503 con mensaje claro | Llamada real a Gemini 200; tests de fallback y 503 |
 
 ## 12. Git, versiones y evidencias
 
@@ -295,11 +329,13 @@ Hitos y commits relevantes de este cambio:
 - Tests reescritos con proveedor simulado y rechazo 401.
 - Tailwind CSS v4 configurado.
 - Imagen Docker multi-etapa y `.dockerignore`.
-- Documentación de tests, Docker y variables.
+- Reintento corto y modelo de respaldo ante la saturación de Gemini.
+- `docker-compose.yml` para construir y ejecutar el contenedor local.
+- Documentación de tests, Docker, direcciones y variables.
 
-El tag de la fase de contenedor será `v0.5-docker` una vez aprobados y publicados los
-commits. Las capturas de Vercel, Clerk, Docker y EC2 se guardarán en `evidencias/` y se
-enlazarán aquí cuando existan; no se incluyen capturas simuladas.
+El tag `v0.5-docker` apunta al commit de documentación de este hito. Las capturas de
+Vercel, Clerk, Docker y EC2 se guardarán en `evidencias/` y se enlazarán aquí cuando
+existan; no se incluyen capturas simuladas.
 
 ## 13. Referencias
 
