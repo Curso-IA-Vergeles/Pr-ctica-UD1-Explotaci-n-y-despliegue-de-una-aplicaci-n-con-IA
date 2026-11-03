@@ -1,0 +1,33 @@
+# Secretos y configuración local: nunca deben entrar en el contexto de build.
+.env
+.env.*
+!.env.example
+
+# Git y metadatos
+.git
+.gitignore
+.gitattributes
+
+# Dependencias y artefactos locales
+node_modules
+dist
+dist-ssr
+api/venv
+api/.venv
+api/__pycache__
+api/.pytest_cache
+api/static
+
+# Tests y dependencias de desarrollo (no se usan en la imagen final)
+api/test_main.py
+api/requirements-dev.txt
+
+# Documentación y evidencias
+README.md
+*.md
+evidencias
+
+# Editores y sistema
+.vscode
+.idea
+.DS_Store
