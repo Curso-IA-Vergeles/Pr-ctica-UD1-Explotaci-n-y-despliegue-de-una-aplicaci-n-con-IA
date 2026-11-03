@@ -36,3 +36,9 @@ env/
 .env.*.local
 .vercel
 .env*
+# La plantilla si se publica; nunca el .env real
+!.env.example
+
+# Artefactos de build y tests
+api/static/
+.pytest_cache/
