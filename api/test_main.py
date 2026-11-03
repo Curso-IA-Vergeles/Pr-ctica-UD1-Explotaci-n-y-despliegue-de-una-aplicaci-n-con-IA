@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from google.genai import errors as genai_errors
 
 import main
 
@@ -19,18 +20,26 @@ def _limpiar_overrides():
 
 
 class _FakeModels:
-    def __init__(self, error=None):
+    def __init__(self, error=None, fail_models=None):
         self.error = error
+        self.fail_models = set(fail_models or ())
+        self.calls = []
 
-    def generate_content(self, **_kwargs):
+    def generate_content(self, model, **_kwargs):
+        self.calls.append(model)
+        if model in self.fail_models:
+            raise genai_errors.ServerError(
+                503,
+                {"error": {"code": 503, "message": "high demand"}},
+            )
         if self.error:
             raise self.error
         return SimpleNamespace(text="Resumen de prueba.")
 
 
 class _FakeClient:
-    def __init__(self, error=None):
-        self.models = _FakeModels(error)
+    def __init__(self, error=None, fail_models=None):
+        self.models = _FakeModels(error, fail_models)
 
 
 def _permitir_sesion() -> None:
@@ -65,6 +74,37 @@ def test_generar_resumen_con_sesion_valida(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"resumen": "Resumen de prueba."}
+
+
+def test_generar_usa_modelo_de_respaldo_si_el_primario_esta_saturado(monkeypatch):
+    _permitir_sesion()
+    monkeypatch.setenv("AI_MODEL", "gemini-2.5-flash")
+    monkeypatch.setenv("AI_FALLBACK_MODEL", "gemini-3.5-flash")
+    fake = _FakeClient(fail_models={"gemini-2.5-flash"})
+    monkeypatch.setattr(main, "get_client", lambda: fake)
+
+    response = client.post("/api/generar", json={"texto": "Texto válido."})
+
+    assert response.status_code == 200
+    assert response.json() == {"resumen": "Resumen de prueba."}
+    assert fake.models.calls == ["gemini-2.5-flash", "gemini-3.5-flash"]
+
+
+def test_generar_devuelve_503_si_todos_los_modelos_estan_saturados(monkeypatch):
+    _permitir_sesion()
+    monkeypatch.setenv("AI_MODEL", "gemini-2.5-flash")
+    monkeypatch.setenv("AI_FALLBACK_MODEL", "gemini-3.5-flash")
+    fake = _FakeClient(
+        fail_models={"gemini-2.5-flash", "gemini-3.5-flash"}
+    )
+    monkeypatch.setattr(main, "get_client", lambda: fake)
+
+    response = client.post("/api/generar", json={"texto": "Texto válido."})
+
+    assert response.status_code == 503
+    assert "saturado" in response.json()["detail"].lower()
+    assert "high demand" not in response.text
+    assert fake.models.calls == ["gemini-2.5-flash", "gemini-3.5-flash"]
 
 
 def test_generar_rechaza_texto_vacio():

@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 
@@ -43,6 +44,10 @@ class ResponseData(BaseModel):
 
 _client = None
 
+DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash"
+TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+
 
 def get_client() -> genai.Client:
     """Crea el cliente de Gemini de forma perezosa, sin fallar al importar."""
@@ -66,9 +71,30 @@ def get_client() -> genai.Client:
     timeout_ms = max(timeout_seconds, 1) * 1000
     _client = genai.Client(
         api_key=api_key,
-        http_options=genai_types.HttpOptions(timeout=timeout_ms),
+        http_options=genai_types.HttpOptions(
+            timeout=timeout_ms,
+            # Dos intentos como máximo: si el modelo está saturado, el fallback
+            # responde antes de que la petición HTTP se quede esperando.
+            retry_options=genai_types.HttpRetryOptions(
+                attempts=2,
+                initial_delay=0.5,
+                max_delay=2.0,
+                jitter=0.2,
+                http_status_codes=sorted(TRANSIENT_STATUS_CODES),
+            ),
+        ),
     )
     return _client
+
+
+def _candidate_models() -> list[str]:
+    """Modelo principal y, si se configura, uno de respaldo."""
+    primary = os.getenv("AI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    fallback = os.getenv("AI_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL).strip()
+    models = [primary]
+    if fallback and fallback != primary:
+        models.append(fallback)
+    return models
 
 
 def _authorized_parties() -> list[str] | None:
@@ -155,14 +181,40 @@ def generar_resumen(data: RequestData, _user: dict = Depends(require_user)):
         f"Texto a resumir:\n\n{texto}"
     )
 
-    try:
-        response = client.models.generate_content(
-            model=os.getenv("AI_MODEL", "gemini-2.5-flash"),
-            contents=prompt,
-        )
-    except Exception:
-        # El detalle se registra en el servidor; al cliente solo va un mensaje genérico.
-        logger.exception("Fallo al llamar al proveedor de IA.")
+    response = None
+    fallo_transitorio = False
+    for model in _candidate_models():
+        try:
+            response = client.models.generate_content(model=model, contents=prompt)
+            break
+        except genai_errors.APIError as exc:
+            status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+            fallo_transitorio = status_code in TRANSIENT_STATUS_CODES
+            # El detalle queda en el servidor; no se envía al navegador.
+            logger.warning(
+                "Fallo del proveedor de IA con el modelo %s (HTTP %s): %s",
+                model,
+                status_code,
+                str(exc)[:300],
+            )
+            if not fallo_transitorio:
+                break
+        except Exception:
+            logger.exception(
+                "Fallo inesperado al llamar al proveedor de IA con el modelo %s.", model
+            )
+            fallo_transitorio = False
+            break
+
+    if response is None:
+        if fallo_transitorio:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "El proveedor de IA está temporalmente saturado. "
+                    "Inténtalo de nuevo en unos segundos."
+                ),
+            )
         raise HTTPException(
             status_code=502,
             detail="No se pudo obtener el resumen del proveedor de IA.",
