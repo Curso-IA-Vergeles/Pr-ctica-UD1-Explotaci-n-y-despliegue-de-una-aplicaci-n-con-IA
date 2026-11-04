@@ -135,21 +135,57 @@ reconstruir la imagen.
 
 ## 6. Vercel
 
-El proyecto único (`miniapp-ia`, conectado a GitHub) contiene la SPA y la función Python:
+Un **único proyecto** (`miniapp-ia`, equipo `ccorand919-5393`, conectado a GitHub) contiene la
+SPA y la función Python:
 
+- La SPA (Vite) se compila como sitio estático.
+- `api/main.py` se ejecuta como Vercel Function con runtime Python (en `inspect` aparece
+  como `λ api/main`).
 - `vercel.json` está en la **raíz** del repositorio y reescribe `/api/(.*)` a `/api/main`.
 - La función expone `GET /api/health` y `POST /api/generar`.
-- Variables de servidor: `AI_PROVIDER_API_KEY`, `AI_MODEL`, `AI_FALLBACK_MODEL`,
-  `AI_TIMEOUT_SECONDS`, `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES`.
-- Variable de compilación: `VITE_CLERK_PUBLISHABLE_KEY`.
-- `CLERK_AUTHORIZED_PARTIES` debe incluir el dominio de producción y los de preview que
-  se vayan a usar; no se debe limitar a `localhost`.
-- URL: <https://miniapp-ia.vercel.app>
+- URL de producción: <https://miniapp-ia.vercel.app>
 
-**Estado:** la aplicación está desplegada y el login de Clerk funciona. **Pendiente:**
-registrar aquí las operaciones reales de Vercel CLI con su finalidad y resultado
-(`vercel link`, `vercel deploy`, `vercel --prod`, `vercel env ls`, `vercel inspect` /
-`vercel logs`), las capturas y el tag `v0.3-vercel`.
+### Variables de entorno en Vercel
+
+| Variable | Tipo | Entorno | Uso |
+| --- | --- | --- | --- |
+| `AI_PROVIDER_API_KEY` | Secret | Production | Ejecución (función) |
+| `CLERK_SECRET_KEY` | Secret | Production | Ejecución (función) |
+| `CLERK_AUTHORIZED_PARTIES` | Config | Production | Ejecución (función); valor `https://miniapp-ia.vercel.app` |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Config (pública) | Production | Compilación del frontend |
+
+`AI_MODEL`, `AI_FALLBACK_MODEL` y `AI_TIMEOUT_SECONDS` no se definen: se usan los valores
+por defecto del código. Los despliegues de **Preview** no tienen variables y además están
+protegidos por *Vercel Authentication* (Deployment Protection), por lo que no se usan para
+pruebas funcionales: el entorno funcional es Production. Las URL de preview son aleatorias
+y no podrían coincidir con `CLERK_AUTHORIZED_PARTIES`.
+
+### Operaciones realizadas con Vercel CLI
+
+CLI 65.11.0, instalada con `npm install -g vercel`. Comandos ejecutados desde la raíz del
+proyecto:
+
+| Comando | Finalidad | Resultado |
+| --- | --- | --- |
+| `vercel whoami` | Comprobar la sesión | Sesión iniciada en el equipo `ccorand919-5393` (plan Hobby) |
+| `vercel link` | Vincular la carpeta con el proyecto existente | `Linked ccorand919-5393/miniapp-ia` (se elige el proyecto «linked by git», sin crear otro). Crea `.vercel/` y `.env.local`, ambos ignorados por Git |
+| `vercel ls` | Consultar los despliegues del proyecto | Lista de despliegues de Production y Preview; uno antiguo en estado `Error` |
+| `vercel env ls` | Consultar variables sin mostrar secretos | Nombres, tipos y entornos; los secretos aparecen como `Hidden` |
+| `vercel env add CLERK_AUTHORIZED_PARTIES production` | Añadir la variable del claim `azp` | Añadida como Config en Production; el valor se introduce de forma interactiva, sin dejarlo en el historial. La CLI indica que ahora se usa `--environment` |
+| `vercel deploy` | Crear un despliegue de preview | `Ready in 18s`; protegido por Deployment Protection |
+| `vercel deploy --prod` | Publicar el despliegue final | `Ready in 17s`; alias `https://miniapp-ia.vercel.app` |
+| `vercel inspect https://miniapp-ia.vercel.app` | Inspeccionar el despliegue de producción | `status Ready`, `target production`, función `api/main` en `iad1` |
+| `vercel logs --deployment miniapp-ia.vercel.app` | Comprobar el funcionamiento | El backend consulta `api.clerk.com/v1/jwks` (verificación de firma) y llama a Gemini con respuesta `200 OK` |
+
+`vercel env pull` no se utiliza: escribiría secretos en un archivo local. `vercel link`
+genera `.env.local` con un `VERCEL_OIDC_TOKEN` que no se usa y que Git ignora.
+
+**Versión desplegada:** código de `main` en el momento del despliegue desde la CLI
+(commit: _anotar con `git rev-parse --short HEAD`_). Tag del hito: `v0.3-vercel`
+(_pendiente de crear_).
+
+**Pendiente de registrar:** capturas de la terminal, del proyecto y de las variables, y el
+resultado de `vercel inspect <despliegue> --logs` sobre el despliegue antiguo en `Error`.
 
 ## 7. Clerk
 
