@@ -62,10 +62,10 @@ function App() {
       <div className="max-w-2xl w-full space-y-8 bg-white p-8 rounded-xl shadow-md border border-gray-100">
         <div>
           <h1 className="text-3xl font-extrabold text-gray-900 text-center">
-            Resumidor de Textos IA
+            Resumidor de Textos 
           </h1>
           <p className="mt-2 text-sm text-gray-600 text-center">
-            Introduce un texto y obtén un resumen conciso procesado por el backend.
+            Introduce un texto y obtén un resumen.
           </p>
         </div>
 
@@ -86,7 +86,7 @@ function App() {
           <form onSubmit={handleSubmit} className="mt-8 space-y-6">
             <div>
               <label htmlFor="texto" className="block text-sm font-medium text-gray-700">
-                Payload de entrada
+                Entrada
               </label>
               <div className="mt-1">
                 <textarea
